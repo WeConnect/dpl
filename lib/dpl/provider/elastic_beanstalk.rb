@@ -48,7 +48,7 @@ module DPL
         end
 
         s3_object = upload(archive_name, zip_file)
-        sleep 5 #s3 eventual consistency
+        sleep 50 #s3 eventual consistency
         version = create_app_version(s3_object)
         if !only_create_app_version
           update_app(version)
@@ -60,7 +60,7 @@ module DPL
         # elastic beanstalk has a limitation for build
         # descriptions to be no more than 100 characters in length
         msg = super
-        
+
         if msg.length > 100
           msg[0, 97] + '...'
         else
