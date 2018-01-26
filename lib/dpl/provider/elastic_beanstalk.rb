@@ -23,7 +23,7 @@ module DPL
         create_bucket unless bucket_exists?
         zip_file = create_zip
         s3_object = upload(archive_name, zip_file)
-        sleep 5 #s3 eventual consistency
+        sleep 50 #s3 eventual consistency
         version = create_app_version(s3_object)
         update_app(version)
       end
@@ -32,7 +32,7 @@ module DPL
         # elastic beanstalk has a limitation for build
         # descriptions to be no more than 100 characters in length
         msg = super
-        
+
         if msg.length > 100
           msg[0, 97] + '...'
         else
