@@ -1,9 +1,11 @@
+require 'time'
+
 module DPL
   class Provider
     class ElasticBeanstalk < Provider
       experimental 'AWS Elastic Beanstalk'
 
-      requires 'aws-sdk-v1'
+      requires 'aws-sdk', version: '~> 2.0'
       requires 'rubyzip', :load => 'zip'
 
       DEFAULT_REGION = 'us-east-1'
@@ -12,20 +14,46 @@ module DPL
         false
       end
 
+      def access_key_id
+        options[:access_key_id] || context.env['AWS_ACCESS_KEY_ID'] || raise(Error, "missing access_key_id")
+      end
+
+      def secret_access_key
+        options[:secret_access_key] || context.env['AWS_SECRET_ACCESS_KEY'] || raise(Error, "missing secret_access_key")
+      end
+
       def check_auth
-        AWS.config(access_key_id: option(:access_key_id), secret_access_key: option(:secret_access_key), region: region)
+        options = {
+          :region      => region,
+          :credentials => Aws::Credentials.new(access_key_id, secret_access_key)
+        }
+        Aws.config.update(options)
       end
 
       def check_app
       end
 
+      def only_create_app_version
+        options[:only_create_app_version]
+      end
+
       def push_app
+        @start_time = Time.now
         create_bucket unless bucket_exists?
-        zip_file = create_zip
+
+        if options[:zip_file]
+          zip_file = File.expand_path(options[:zip_file])
+        else
+          zip_file = create_zip
+        end
+
         s3_object = upload(archive_name, zip_file)
         sleep 5 #s3 eventual consistency
         version = create_app_version(s3_object)
-        update_app(version)
+        if !only_create_app_version
+          update_app(version)
+          wait_until_deployed if options[:wait_until_deployed]
+        end
       end
 
       private
@@ -35,11 +63,15 @@ module DPL
       end
 
       def env_name
-        option(:env)
+        options[:env] || context.env['ELASTIC_BEANSTALK_ENV'] || raise(Error, "missing env")
       end
 
       def version_label
-        "travis-#{sha}-#{Time.now.to_i}"
+        context.env['ELASTIC_BEANSTALK_LABEL'] || "travis-#{sha}-#{Time.now.to_i}"
+      end
+
+      def version_description
+        context.env['ELASTIC_BEANSTALK_DESCRIPTION'] || commit_msg
       end
 
       def archive_name
@@ -47,27 +79,31 @@ module DPL
       end
 
       def region
-        option(:region) || DEFAULT_REGION
+        options[:region] || DEFAULT_REGION
       end
 
       def bucket_name
         option(:bucket_name)
       end
 
+      def bucket_path
+        @bucket_path ||= options[:bucket_path] ? option(:bucket_path).gsub(/\/*$/,'/') : nil
+      end
+
       def s3
-        @s3 ||= AWS::S3.new
+        @s3 ||= Aws::S3::Resource.new
       end
 
       def eb
-        @eb ||= AWS::ElasticBeanstalk.new.client
+        @eb ||= Aws::ElasticBeanstalk::Client.new
       end
 
       def bucket_exists?
-        s3.buckets.map(&:name).include? bucket_name
+        s3.bucket(bucket_name).exists?
       end
 
       def create_bucket
-        s3.buckets.create(bucket_name)
+        s3.bucket(bucket_name).create
       end
 
       def files_to_pack
@@ -92,16 +128,22 @@ module DPL
       end
 
       def upload(key, file)
-        obj = s3.buckets[bucket_name].objects[key]
-        obj.write(Pathname.new(file))
+        options = {
+          :body => Pathname.new(file).open
+        }
+        bucket = s3.bucket(bucket_name)
+        obj = bucket_path ? bucket.object("#{bucket_path}#{key}") : bucket.object(key)
+        obj.put(options)
         obj
       end
 
       def create_app_version(s3_object)
+        # Elastic Beanstalk doesn't support descriptions longer than 200 characters
+        description = version_description[0, 200]
         options = {
           :application_name  => app_name,
           :version_label     => version_label,
-          :description       => commit_msg,
+          :description       => description,
           :source_bundle     => {
             :s3_bucket => bucket_name,
             :s3_key    => s3_object.key
@@ -109,6 +151,40 @@ module DPL
           :auto_create_application => false
         }
         eb.create_application_version(options)
+      end
+
+      # Wait until EB environment update finishes
+      def wait_until_deployed
+        errorEvents = 0 # errors counter, should remain 0 for successful deployment
+        events = []
+
+        loop do
+          environment = eb.describe_environments({
+            :application_name  => app_name,
+            :environment_names => [env_name]
+          })[:environments].first
+
+          eb.describe_events({
+            :environment_name  => env_name,
+            :start_time        => @start_time.utc.iso8601,
+          })[:events].reverse.each do |event|
+            message = "#{event[:event_date]} [#{event[:severity]}] #{event[:message]}"
+            unless events.include?(message)
+              events.push(message)
+              if event[:severity] == "ERROR"
+                errorEvents += 1
+                warn(message)
+              else
+                log(message)
+              end
+            end
+          end
+
+          break if environment[:status] == "Ready"
+          sleep 5
+        end
+
+        if errorEvents > 0 then error("Deployment failed.") end
       end
 
       def update_app(version)

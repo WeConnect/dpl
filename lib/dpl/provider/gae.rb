@@ -1,68 +1,96 @@
-require 'digest/sha1'
-require 'open-uri'
-
 module DPL
   class Provider
     class GAE < Provider
       experimental 'Google App Engine'
 
-      # https://developers.google.com/appengine/downloads
-      GAE_VERSION='1.9.13'
-      GAE_ZIP_FILE="google_appengine_#{GAE_VERSION}.zip"
-      SHA1SUM='05166691108caddc4d4cfdf683cfc4748df197a2'
-      BASE_DIR=Dir.pwd
-      GAE_DIR=File.join(BASE_DIR, 'google_appengine')
-      APPCFG_BIN=File.join(GAE_DIR, 'appcfg.py')
+      BASE='https://dl.google.com/dl/cloudsdk/channels/rapid/'
+      NAME='google-cloud-sdk'
+      EXT='.tar.gz'
+      INSTALL='~'
+      BOOTSTRAP="#{INSTALL}/#{NAME}/bin/bootstrapping/install.py"
+      GCLOUD="#{INSTALL}/#{NAME}/bin/gcloud"
 
-      def self.install_sdk
-        requires 'rubyzip', :load => 'zip'
-        $stderr.puts "Setting up Google App Engine SDK"
-
-        Dir.chdir(BASE_DIR) do
-          unless File.exists? GAE_ZIP_FILE
-            $stderr.puts "Downloading Google App Engine SDK"
-            File.open(GAE_ZIP_FILE, "wb") do |dest|
-              open("https://storage.googleapis.com/appengine-sdks/featured/#{GAE_ZIP_FILE}", "rb") do |src|
-                dest.write(src.read)
-              end
-            end
-          end
-          sha1sum = Digest::SHA1.hexdigest(File.read(GAE_ZIP_FILE))
-          unless sha1sum == SHA1SUM
-            raise "Checksum did not match for #{GAE_ZIP_FILE}"
-          end
-
-          unless File.directory? 'google_appengine'
-            $stderr.puts "Extracting Google App Engine SDK archive"
-            Zip::File.open(GAE_ZIP_FILE) do |file|
-              file.each do |entry|
-                entry.extract entry.name
-              end
-            end
-          end
-        end
+      def with_python_2_7(cmd)
+        cmd.gsub!(/'/, "'\\\\''")
+        context.shell("bash -c 'source #{context.env['HOME']}/virtualenv/python2.7/bin/activate; #{cmd}'")
       end
 
-      install_sdk
+      def install_deploy_dependencies
+        if File.exists? GCLOUD
+          return
+        end
+
+        $stderr.puts 'Python 2.7 Version'
+
+        unless with_python_2_7("python -c 'import sys; print(sys.version)'")
+          error 'Could not use python2.7'
+        end
+
+        $stderr.puts 'Downloading Google Cloud SDK ...'
+
+        unless context.shell("curl -L #{BASE + NAME + EXT} | gzip -d | tar -x -C #{INSTALL}")
+          error 'Could not download Google Cloud SDK.'
+        end
+
+        $stderr.puts 'Bootstrapping Google Cloud SDK ...'
+
+        unless with_python_2_7("#{BOOTSTRAP} --usage-reporting=false --command-completion=false --path-update=false")
+          error 'Could not bootstrap Google Cloud SDK.'
+        end
+      end
 
       def needs_key?
         false
       end
 
       def check_auth
+        unless with_python_2_7("#{GCLOUD} -q auth activate-service-account --key-file #{keyfile}")
+          error 'Authentication failed.'
+        end
       end
 
-      def app_dir
-        options[:app_dir] || context.env['TRAVIS_BUILD_DIR'] || Dir.pwd
+      def keyfile
+        options[:keyfile] || context.env['GOOGLECLOUDKEYFILE'] || 'service-account.json'
+      end
+
+      def project
+        options[:project] || context.env['GOOGLECLOUDPROJECT'] || context.env['CLOUDSDK_CORE_PROJECT'] || File.dirname(context.env['TRAVIS_REPO_SLUG'] || '')
+      end
+
+      def version
+        options[:version]
+      end
+
+      def config
+        options[:config] || 'app.yaml'
+      end
+
+      def no_promote
+        options[:no_promote]
+      end
+
+      def verbosity
+        options[:verbosity] || 'warning'
+      end
+
+      def no_stop_previous_version
+        options[:no_stop_previous_version]
       end
 
       def push_app
-        puts "About to call push_app in with #{self.class} provider"
-        puts "APPCFG_BIN: #{APPCFG_BIN}"
-        unless File.exist?(APPCFG_BIN)
-          puts "APPCFG_BIN does not exist"
+        command = GCLOUD
+        command << ' --quiet'
+        command << " --verbosity \"#{verbosity}\""
+        command << " --project \"#{project}\""
+        command << " app deploy \"#{config}\""
+        command << " --version \"#{version}\"" unless version.to_s.empty?
+        command << " --#{no_promote ? 'no-' : ''}promote"
+        command << ' --no-stop-previous-version' unless no_stop_previous_version.to_s.empty?
+        unless with_python_2_7(command)
+          log 'Deployment failed.'
+          context.shell('find $HOME/.config/gcloud/logs -type f -print -exec cat {} \;')
+          error ''
         end
-        context.shell "#{APPCFG_BIN} --oauth2_refresh_token=#{options[:oauth_refresh_token]} update #{app_dir}"
       end
     end
   end

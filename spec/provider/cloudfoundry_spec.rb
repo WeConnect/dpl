@@ -6,22 +6,33 @@ describe DPL::Provider::CloudFoundry do
     described_class.new(DummyContext.new, api: 'api.run.awesome.io', username: 'mallomar',
                         password: 'myreallyawesomepassword',
                         organization: 'myorg',
-                        space: 'outer')
+                        space: 'outer',
+                        manifest: 'worker-manifest.yml',
+                        skip_ssl_validation: true)
   end
 
   describe "#check_auth" do
     example do
-      expect(provider.context).to receive(:shell).with('wget http://go-cli.s3-website-us-east-1.amazonaws.com/releases/latest/cf-cli_amd64.deb -qO temp.deb && sudo dpkg -i temp.deb')
-      expect(provider.context).to receive(:shell).with('rm temp.deb')
-      expect(provider.context).to receive(:shell).with('cf api api.run.awesome.io')
-      expect(provider.context).to receive(:shell).with('cf login --u mallomar --p myreallyawesomepassword --o myorg --s outer')
+      expect(provider.context).to receive(:shell).with('test x$TRAVIS_OS_NAME = "xlinux" && rel="linux64-binary" || rel="macosx64"; wget "https://cli.run.pivotal.io/stable?release=${rel}&source=github" -qO cf.tgz && tar -zxvf cf.tgz && rm cf.tgz')
+      expect(provider.context).to receive(:shell).with('./cf api api.run.awesome.io --skip-ssl-validation')
+      expect(provider.context).to receive(:shell).with('./cf login -u mallomar -p myreallyawesomepassword -o myorg -s outer')
       provider.check_auth
     end
   end
 
   describe "#check_app" do
-    example do
-      expect{provider.check_app}.to raise_error('Application must have a manifest.yml for unattended deployment')
+    context 'when the manifest file exists' do
+      example do
+        File.stub(:exists?).with('worker-manifest.yml').and_return(true)
+        expect{provider.check_app}.not_to raise_error
+      end
+    end
+
+    context 'when the manifest file exists' do
+      example do
+        File.stub(:exists?).with('worker-manifest.yml').and_return(false)
+        expect{provider.check_app}.to raise_error('Application must have a manifest.yml for unattended deployment')
+      end
     end
   end
 
@@ -32,11 +43,29 @@ describe DPL::Provider::CloudFoundry do
   end
 
   describe "#push_app" do
-    example do
-      expect(provider.context).to receive(:shell).with('cf push')
-      expect(provider.context).to receive(:shell).with('cf logout')
-      provider.push_app
+    before do
+      allow(provider.context).to receive(:shell).and_return(true)
+    end
 
+    example "With manifest" do
+      expect(provider.context).to receive(:shell).with('./cf push -f worker-manifest.yml')
+      expect(provider.context).to receive(:shell).with('./cf logout')
+      provider.push_app
+    end
+
+    example "Without manifest" do
+      provider.options.update(:manifest => nil)
+      expect(provider.context).to receive(:shell).with('./cf push')
+      expect(provider.context).to receive(:shell).with('./cf logout')
+      provider.push_app
+    end
+
+    example 'Failed to push' do
+      allow(provider.context).to receive(:shell).and_return(false)
+
+      expect(provider.context).to receive(:shell).with('./cf push -f worker-manifest.yml')
+      expect(provider.context).to receive(:shell).with('./cf logout')
+      expect{provider.push_app}.to raise_error(DPL::Error, 'Failed to push app')
     end
   end
 end

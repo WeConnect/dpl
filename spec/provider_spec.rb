@@ -12,6 +12,11 @@ describe DPL::Provider do
     example { expect(described_class.new(DummyContext.new, :provider => "Example")) .to be_an(example_provider) }
     example { expect(described_class.new(DummyContext.new, :provider => "exa_mple")).to be_an(example_provider) }
     example { expect(described_class.new(DummyContext.new, :provider => "exa-mple")).to be_an(example_provider) }
+    example "install deployment dependencies" do
+      expect_any_instance_of(described_class).to receive(:respond_to?).with(:install_deploy_dependencies).and_return(true)
+      expect_any_instance_of(described_class).to receive(:install_deploy_dependencies)
+      described_class.new(DummyContext.new, :provider => "example")
+    end
   end
 
   describe "#requires" do
@@ -49,13 +54,22 @@ describe DPL::Provider do
     example "installed" do
       expect(example_provider).to receive(:`).with("which foo").and_return("/bin/foo\n")
       expect(example_provider).not_to receive(:system)
+      expect(example_provider.context).to receive(:shell).with("export PATH=$PATH:$HOME/.local/bin")
       example_provider.pip("foo")
     end
 
     example "missing" do
       expect(example_provider).to receive(:`).with("which foo").and_return("")
-      expect(example_provider.context).to receive(:shell).with("sudo pip install foo", retry: true)
+      expect(example_provider.context).to receive(:shell).with("pip install --user foo", retry: true)
+      expect(example_provider.context).to receive(:shell).with("export PATH=$PATH:$HOME/.local/bin")
       example_provider.pip("foo")
+    end
+
+    example "specific version" do
+      expect(example_provider).to receive(:`).with("which foo").and_return("")
+      expect(example_provider.context).to receive(:shell).with("pip install --user foo==1.0", retry: true)
+      expect(example_provider.context).to receive(:shell).with("export PATH=$PATH:$HOME/.local/bin")
+      example_provider.pip("foo", "foo", "1.0")
     end
   end
 
@@ -136,8 +150,27 @@ describe DPL::Provider do
   describe "#encoding_for" do
     example do
       path = 'foo.js'
-      expect(provider).to receive(:`).at_least(1).times.with("file #{path}").and_return('gzip compressed')
+      expect(provider).to receive(:`).at_least(1).times.with("file '#{path}'").and_return("#{path}: gzip compressed")
       expect(provider.encoding_for(path)).to eq('gzip')
+    end
+
+    example do
+      path = 'file with a space'
+      expect(provider).to receive(:`).at_least(1).times.with("file '#{path}'").and_return("#{path}: empty")
+      expect(provider.encoding_for(path)).to be_nil
+    end
+
+    example do
+      path = 'foo.js'
+      expect(provider).to receive(:`).at_least(1).times.with("file '#{path}'").and_return("#{path}: ASCII text, with very long line")
+      expect(provider.encoding_for(path)).to eq('text')
+    end
+
+    example do
+      path = 'foo.js'
+      provider.options.update(:default_text_charset => 'UTF-8')
+      expect(provider).to receive(:`).at_least(1).times.with("file '#{path}'").and_return("#{path}: ASCII text, with very long line")
+      expect(provider.encoding_for(path)).to eq('text')
     end
   end
 

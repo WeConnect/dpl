@@ -2,7 +2,26 @@ language: ruby
 rvm:
 - 1.9.3
 - 2.0.0
-- 2.1.0
+- 2.1.5
+- "2.2.5"
+- "2.3.1"
+
+matrix:
+  include:
+    - rvm: "2.2.6"
+      sudo: required
+  allow_failures:
+    - rvm: "2.3.1"
+
+sudo: false
+
+cache: bundler
+
+before_install:
+  - gem update bundler
+
+script:
+  - bundle exec rake && gem build dpl.gemspec && gem install dpl-*.gem && dpl --provider=script --script='echo foo'
 
 deploy:
   provider: rubygems
@@ -11,7 +30,7 @@ deploy:
   gem: dpl
   on:
     repo: travis-ci/dpl
-    ruby: 1.9.3
+    ruby: 2.2.6
 
 notifications:
   webhooks: "http://requestb.in/1guaq7t1"

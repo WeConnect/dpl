@@ -55,7 +55,7 @@ describe DPL::Provider::CodeDeploy do
   client_options = {
     :stub_responses => true,
     :region => 'us-east-1',
-    :credentials => Aws::Credentials.new(access_key_id, secret_access_key),
+    :credentials => ::Aws::Credentials.new(access_key_id, secret_access_key),
     :endpoint => 'https://codedeploy.us-east-1.amazonaws.com'
   }
 
@@ -72,7 +72,7 @@ describe DPL::Provider::CodeDeploy do
 
   describe '#code_deploy' do
     example do
-      expect(Aws::CodeDeploy::Client).to receive(:new).with(client_options).once
+      expect(::Aws::CodeDeploy::Client).to receive(:new).with(client_options).once
       provider.code_deploy
     end
   end
@@ -89,7 +89,9 @@ describe DPL::Provider::CodeDeploy do
       s3_location: {
         bucket:      'bucket',
         bundle_type: 'tar',
-        key:         'key'
+        key:         'key',
+        version:     'object_version_id',
+        e_tag:       'etag'
       }
     }
 
@@ -162,20 +164,24 @@ describe DPL::Provider::CodeDeploy do
     key = "/some/key.#{bundle_type}"
 
     before(:each) do
-      expect(provider).to receive(:option).with(:bucket).and_return(bucket)
+      head_data = provider.s3api.stub(:head_object).and_return({
+        version_id: 'object_version_id',
+        etag: 'etag'
+      })
+      provider.s3api.stub_responses(:head_object, head_data)
+      expect(provider).to receive(:option).at_least(1).times.with(:bucket).and_return(bucket)
       expect(provider).to receive(:bundle_type).and_return(bundle_type)
-      expect(provider).to receive(:s3_key).and_return(key)
+      expect(provider).to receive(:s3_key).at_least(1).times.and_return(key)
     end
 
     example do
-      expect(provider.s3_revision).to eq({
-        revision_type: 'S3',
-        s3_location: {
+      expect(provider.s3_revision[:s3_location]).to include(
           bucket: bucket,
           bundle_type: bundle_type,
-          key: key
-        }
-      })
+          key: key,
+          version: 'object_version_id',
+          e_tag: 'etag'
+        )
     end
   end
 
@@ -255,6 +261,24 @@ describe DPL::Provider::CodeDeploy do
         expect(provider).to receive(:log).with(/Triggered deployment \"#{deployment_id}\"\./)
         provider.push_app
       end
+
+       before do
+        allow(provider.code_deploy).to receive(:get_deployment).and_return(
+          {:deployment_info => {:status => "Created"}},
+          {:deployment_info => {:status => "Queued"}},
+          {:deployment_info => {:status => "InProgress"}},
+          {:deployment_info => {:status => "Succeeded"}})
+      end
+
+      example 'with :wait_until_deployed' do
+        old_options = provider.options
+        provider.stub(:options) {old_options.merge({
+          app_id: 'app-id',
+          wait_until_deployed: true})}
+        expect(provider).to receive(:log).with(/Triggered deployment \"#{deployment_id}\"\./)
+        expect(provider).to receive(:log).with(/Deployment successful./)
+        provider.push_app
+      end
     end
 
     context 'with an error' do
@@ -285,7 +309,7 @@ describe DPL::Provider::CodeDeploy do
 
     context 'without s3_key' do
       bundle_type = 'tar'
-      
+
       before do
         expect(provider).to receive(:s3_key).and_return('')
         expect(provider).to receive(:option).with(:bundle_type).and_return(bundle_type)

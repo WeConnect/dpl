@@ -6,34 +6,48 @@ module DPL
   class Provider
     include FileUtils
 
-    autoload :Heroku,       'dpl/provider/heroku'
-    autoload :Appfog,       'dpl/provider/appfog'
-    autoload :EngineYard,   'dpl/provider/engine_yard'
-    autoload :DotCloud,     'dpl/provider/dot_cloud'
-    autoload :Nodejitsu,    'dpl/provider/nodejitsu'
-    autoload :Openshift,    'dpl/provider/openshift'
-    autoload :RubyGems,     'dpl/provider/rubygems'
-    autoload :NPM,          'dpl/provider/npm'
-    autoload :S3,           'dpl/provider/s3'
-    autoload :CloudControl, 'dpl/provider/cloudcontrol'
-    autoload :CloudFoundry, 'dpl/provider/cloud_foundry'
-    autoload :CodeDeploy,   'dpl/provider/code_deploy'
-    autoload :PyPI,         'dpl/provider/pypi'
-    autoload :Divshot,      'dpl/provider/divshot'
-    autoload :CloudFiles,   'dpl/provider/cloud_files'
-    autoload :OpsWorks,     'dpl/provider/ops_works'
-    autoload :Modulus,      'dpl/provider/modulus'
-    autoload :Releases,     'dpl/provider/releases'
-    autoload :Cloud66,      'dpl/provider/cloud66'
-    autoload :Ninefold,     'dpl/provider/ninefold'
-    autoload :Hackage,      'dpl/provider/hackage'
-    autoload :Deis,         'dpl/provider/deis'
-    autoload :GCS,          'dpl/provider/gcs'
-    autoload :GAE,          'dpl/provider/gae'
-    autoload :BitBalloon,   'dpl/provider/bitballoon'
-    autoload :Biicode,      'dpl/provider/biicode'
-    autoload :ElasticBeanstalk, 'dpl/provider/elastic_beanstalk'
-    autoload :PuppetForge,  'dpl/provider/puppet_forge'
+    autoload :Anynines,            'dpl/provider/anynines'
+    autoload :Appfog,              'dpl/provider/appfog'
+    autoload :Atlas,               'dpl/provider/atlas'
+    autoload :AzureWebApps,        'dpl/provider/azure_webapps'
+    autoload :Bintray,             'dpl/provider/bintray'
+    autoload :BitBalloon,          'dpl/provider/bitballoon'
+    autoload :BluemixCloudFoundry, 'dpl/provider/bluemix_cloud_foundry'
+    autoload :Boxfuse,             'dpl/provider/boxfuse'
+    autoload :Catalyze,            'dpl/provider/catalyze'
+    autoload :ChefSupermarket,     'dpl/provider/chef_supermarket'
+    autoload :Cloud66,             'dpl/provider/cloud66'
+    autoload :CloudFiles,          'dpl/provider/cloud_files'
+    autoload :CloudFoundry,        'dpl/provider/cloud_foundry'
+    autoload :CodeDeploy,          'dpl/provider/code_deploy'
+    autoload :Deis,                'dpl/provider/deis'
+    autoload :Divshot,             'dpl/provider/divshot'
+    autoload :ElasticBeanstalk,    'dpl/provider/elastic_beanstalk'
+    autoload :EngineYard,          'dpl/provider/engine_yard'
+    autoload :Firebase,            'dpl/provider/firebase'
+    autoload :GAE,                 'dpl/provider/gae'
+    autoload :GCS,                 'dpl/provider/gcs'
+    autoload :Hackage,             'dpl/provider/hackage'
+    autoload :Heroku,              'dpl/provider/heroku'
+    autoload :Lambda,              'dpl/provider/lambda'
+    autoload :Launchpad,           'dpl/provider/launchpad'
+    autoload :Modulus,             'dpl/provider/modulus'
+    autoload :Nodejitsu,           'dpl/provider/nodejitsu'
+    autoload :NPM,                 'dpl/provider/npm'
+    autoload :Openshift,           'dpl/provider/openshift'
+    autoload :OpsWorks,            'dpl/provider/ops_works'
+    autoload :Packagecloud,        'dpl/provider/packagecloud'
+    autoload :Pages,               'dpl/provider/pages'
+    autoload :PuppetForge,         'dpl/provider/puppet_forge'
+    autoload :PyPI,                'dpl/provider/pypi'
+    autoload :Releases,            'dpl/provider/releases'
+    autoload :RubyGems,            'dpl/provider/rubygems'
+    autoload :S3,                  'dpl/provider/s3'
+    autoload :Scalingo,            'dpl/provider/scalingo'
+    autoload :Script,              'dpl/provider/script'
+    autoload :Surge,               'dpl/provider/surge'
+    autoload :TestFairy,           'dpl/provider/testfairy'
+    autoload :Transifex,           'dpl/provider/transifex'
 
 
     def self.new(context, options)
@@ -42,12 +56,22 @@ module DPL
       context.fold("Installing deploy dependencies") do
         name = super.option(:provider).to_s.downcase.gsub(/[^a-z0-9]/, '')
         raise Error, 'could not find provider %p' % options[:provider] unless name = constants.detect { |c| c.to_s.downcase == name }
-        const_get(name).new(context, options)
+        provider = const_get(name).new(context, options)
+        provider.install_deploy_dependencies if provider.respond_to?(:install_deploy_dependencies)
+        provider
       end
     end
 
     def self.experimental(name)
       puts "", "!!! #{name} support is experimental !!!", ""
+    end
+
+    def self.deprecated(*lines)
+      puts ''
+      lines.each do |line|
+        puts "\e[31;1m#{line}\e[0m"
+      end
+      puts ''
     end
 
     def self.requires(name, options = {})
@@ -73,8 +97,16 @@ module DPL
       context.shell("sudo apt-get -qq install #{name}", retry: true) if `which #{command}`.chop.empty?
     end
 
-    def self.pip(name, command = name)
-      context.shell("sudo pip install #{name}", retry: true) if `which #{command}`.chop.empty?
+    def self.pip(name, command = name, version = nil)
+      if version
+        puts "pip install --user #{name}==#{version}"
+        context.shell("pip uninstall --user -y #{name}") unless `which #{command}`.chop.empty?
+        context.shell("pip install --user #{name}==#{version}", retry: true)
+      else
+        puts "pip install --user #{name}"
+        context.shell("pip install --user #{name}", retry: true) if `which #{command}`.chop.empty?
+      end
+      context.shell("export PATH=$PATH:$HOME/.local/bin")
     end
 
     def self.npm_g(name, command = name)
@@ -146,6 +178,9 @@ module DPL
     def cleanup
       return if options[:skip_cleanup]
       context.shell "mv .dpl ~/dpl"
+      log "Cleaning up git repository with `git stash --all`. " \
+        "If you need build artifacts for deployment, set `deploy.skip_cleanup: true`. " \
+        "See https://docs.travis-ci.com/user/deployment/#Uploading-Files."
       context.shell "git stash --all"
       context.shell "mv ~/dpl .dpl"
     end
@@ -188,13 +223,25 @@ module DPL
       options[:detect_encoding]
     end
 
+    def default_text_charset?
+      options[:default_text_charset]
+    end
+
+    def default_text_charset
+      options[:default_text_charset].downcase
+    end
+
     def encoding_for(path)
-      file_cmd_output = `file #{path}`
+      file_cmd_output = `file '#{path}'`
       case file_cmd_output
       when /gzip compressed/
         'gzip'
       when /compress'd/
         'compress'
+      when /text/
+        'text'
+      when /data/
+        # Shrugs?
       end
     end
 
