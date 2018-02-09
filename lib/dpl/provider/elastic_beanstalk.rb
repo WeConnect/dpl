@@ -49,12 +49,14 @@ module DPL
 
         s3_object = upload(archive_name, zip_file)
         sleep 5 #s3 eventual consistency
+        wait_until_deployed if options[:wait_until_deployed]
         version = create_app_version(s3_object)
+        wait_until_deployed if options[:wait_until_deployed]
         if !only_create_app_version
           update_app(version)
-          puts ">>>>>>>> wait_until_deployed: #{options[:wait_until_deployed]} <<<<<"
           wait_until_deployed if options[:wait_until_deployed]
         end
+        puts ">>>>>>>> got here first <<<<<<<<"
       end
 
       def commit_msg
@@ -168,6 +170,7 @@ module DPL
 
       # Wait until EB environment update finishes
       def wait_until_deployed
+        puts ">>>>>>>> waiting <<<<<<<<"
         errorEvents = 0 # errors counter, should remain 0 for successful deployment
         events = []
 
@@ -205,6 +208,7 @@ module DPL
           :environment_name  => env_name,
           :version_label     => version[:application_version][:version_label]
         }
+        wait_until_deployed if options[:wait_until_deployed]
         eb.update_environment(options)
       end
     end

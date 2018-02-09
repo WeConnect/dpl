@@ -152,7 +152,7 @@ module DPL
       end
 
       context.fold("Deploying application") { push_app }
-
+      puts ">>>>>>>> got here <<<<<<<<"
       Array(options[:run]).each do |command|
         if command == 'restart'
           context.fold("Restarting application") { restart }
