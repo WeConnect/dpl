@@ -55,7 +55,6 @@ module DPL
         if !only_create_app_version
           update_app(version)
         end
-        puts ">>>>>>>> got here first <<<<<<<<"
       end
 
       def commit_msg
