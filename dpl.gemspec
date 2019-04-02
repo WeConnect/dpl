@@ -1,5 +1,9 @@
-$:.unshift File.expand_path("../lib", __FILE__)
-require "dpl/version"
+require './gemspec_helper'
+
+gemspec_for
+
+
+
 
 Gem::Specification.new do |s|
   s.name                  = "dpl"

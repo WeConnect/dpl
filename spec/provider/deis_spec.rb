@@ -20,7 +20,7 @@ describe DPL::Provider::Deis do
   describe "#install_deploy_dependencies" do
     example do
       expect(provider.context).to receive(:shell).with(
-        'curl -sSL http://deis.io/deis-cli/install-v2.sh | bash -x -s v2.0.0'
+        'curl -sSL https://raw.githubusercontent.com/teamhephy/workflow-cli/master/install-v2.sh | bash -x -s v2.0.0'
       ).and_return(true)
       provider.install_deploy_dependencies
     end
