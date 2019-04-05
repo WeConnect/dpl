@@ -37,6 +37,7 @@ module DPL
       end
 
       def push_app
+        puts "RS: PUSH APP"
         @start_time = Time.now
         create_bucket unless bucket_exists?
 
