@@ -296,6 +296,7 @@ module DPL
 
     def log(message)
       puts(message)
+      puts "RS: HERE"
       $stderr.puts(message)
     end
 
