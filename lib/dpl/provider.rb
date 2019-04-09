@@ -295,6 +295,7 @@ module DPL
     end
 
     def log(message)
+      puts(message)
       $stderr.puts(message)
     end
 
