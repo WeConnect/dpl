@@ -183,7 +183,7 @@ module DPL
       rm_rf ".dpl"
       mkdir_p ".dpl"
 
-      context.fold("Preparing deploy") do
+      context.fold("Preparing deploy now") do
         check_auth
         check_app
 
